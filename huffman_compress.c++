@@ -21,7 +21,8 @@ struct HuffmanNode {
 class HuffmanCompression {
 private:
     vector<HuffmanNode*> heap;
-    
+    map<unsigned char, string> huffmanCodes; // 存储每个字节的哈夫曼编码
+
     // 堆的比较函数：词频小的优先，词频相同时按字节值排序
     static bool compareNodes(HuffmanNode* a, HuffmanNode* b) {
         if (a->frequency == b->frequency) {
@@ -73,7 +74,116 @@ private:
         return minNode;
     }
 
+    // 生成哈夫曼编码
+    void generateCodes(HuffmanNode* root, string code = "") {
+        if (!root) return;
+        
+        // 叶子节点
+        if (!root->left && !root->right) {
+            huffmanCodes[root->byte] = code;
+            return;
+        }
+        
+        generateCodes(root->left, code + "0");
+        generateCodes(root->right, code + "1");
+    }
+
+    // 将二进制字符串转换为字节
+    vector<unsigned char> binaryStringToBytes(const string& binaryStr) {
+        vector<unsigned char> bytes;
+        for (size_t i = 0; i < binaryStr.length(); i += 8) {
+            string byte = binaryStr.substr(i, 8);
+            // 补足8位
+            while (byte.length() < 8) byte += "0";
+            bytes.push_back(static_cast<unsigned char>(stoi(byte, nullptr, 2)));
+        }
+        return bytes;
+    }
+
 public:
+
+    void generateCodeTable(const string& filename, HuffmanNode* root) {
+        // 生成哈夫曼编码
+        huffmanCodes.clear();
+        generateCodes(root);
+
+        // 创建编码表文件
+        ofstream codeFile("code.txt", ios::binary);
+        if (!codeFile) {
+            cerr << "无法创建编码表文件！" << endl;
+            return;
+        }
+
+        // 写入原文件大小
+        long fileSize = getFileSize(filename);
+        codeFile.write(reinterpret_cast<const char*>(&fileSize), sizeof(fileSize));
+
+        // 写入编码表
+        for (const auto& pair : huffmanCodes) {
+            unsigned char byte = pair.first;
+            string code = pair.second;
+            unsigned char codeLength = static_cast<unsigned char>(code.length());
+            
+            // 将编码转换为字节
+            vector<unsigned char> codeBytes = binaryStringToBytes(code);
+            
+            // 写入字节值
+            codeFile.write(reinterpret_cast<const char*>(&byte), 1);
+            // 写入编码长度
+            codeFile.write(reinterpret_cast<const char*>(&codeLength), 1);
+            // 写入编码字节
+            codeFile.write(reinterpret_cast<const char*>(codeBytes.data()), 
+                          codeBytes.size());
+        }
+        codeFile.close();
+    }
+
+    // 显示编码表内容
+    void displayCodeTable() {
+        cout << "\n编码表内容（HEX值）：" << endl;
+        for (const auto& pair : huffmanCodes) {
+            cout << "字节: 0x" << hex << uppercase << setw(2) << setfill('0') 
+                 << static_cast<int>(pair.first) << " 编码长度: 0x" 
+                 << setw(2) << pair.second.length();
+            
+            // 转换编码为字节并显示
+            vector<unsigned char> codeBytes = binaryStringToBytes(pair.second);
+            cout << " 位编码: ";
+            for (unsigned char b : codeBytes) {
+                cout << "0x" << setw(2) << static_cast<int>(b) << " ";
+            }
+            cout << dec << endl;
+        }
+    }
+
+    // 编码文件并显示最后16个字节
+    void encodeAndShowLast16Bytes(const string& filename) {
+        ifstream inFile(filename, ios::binary);
+        if (!inFile) {
+            cerr << "无法打开源文件！" << endl;
+            return;
+        }
+
+        string encodedBits;
+        char byte;
+        while (inFile.get(byte)) {
+            encodedBits += huffmanCodes[static_cast<unsigned char>(byte)];
+        }
+        inFile.close();
+
+        // 转换为字节
+        vector<unsigned char> encodedBytes = binaryStringToBytes(encodedBits);
+        
+        // 显示最后16个字节
+        cout << "\n压缩后文件的最后16个字节：" << hex << uppercase;
+        size_t start = encodedBytes.size() > 16 ? encodedBytes.size() - 16 : 0;
+        for (size_t i = start; i < encodedBytes.size(); i++) {
+            cout << "0x" << setw(2) << setfill('0') 
+                 << static_cast<int>(encodedBytes[i]) << " ";
+        }
+        cout << dec << endl;
+    }
+
     // 添加新的文件读取和词频统计方法
     vector<pair<unsigned char, int>> getFrequenciesFromFile(const string& filename) {
         ifstream file(filename, ios::binary);
@@ -213,5 +323,14 @@ int main() {
     double compressionRatio = huffman.calculateCompressionRatio(filename, wpl);
     cout << "预计压缩率：" << fixed << setprecision(2) << compressionRatio << "%" << endl;
     
+     // 生成编码表文件
+    huffman.generateCodeTable(filename, root);
+    
+     // 显示编码表内容
+    //huffman.displayCodeTable();
+     
+     // 显示压缩后的最后16个字节
+    huffman.encodeAndShowLast16Bytes(filename);
+
     return 0;
 }
