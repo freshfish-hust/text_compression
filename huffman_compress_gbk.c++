@@ -95,10 +95,16 @@ private:
     vector<unsigned char> binaryStringToBytes(const string& binaryStr) {
         vector<unsigned char> bytes;
         for (size_t i = 0; i < binaryStr.length(); i += 8) {
-            string byte = binaryStr.substr(i, 8);
+            string byte = binaryStr.substr(i, min(size_t(8), binaryStr.length() - i));
             // 补足8位
-            while (byte.length() < 8) byte += "0";
-            bytes.push_back(static_cast<unsigned char>(stoi(byte, nullptr, 2)));
+            while (byte.length() < 8) {
+                byte += '0';  // 在末尾补0
+            }
+            unsigned char value = 0;
+            for (char bit : byte) {
+                value = (value << 1) | (bit - '0');
+            }
+            bytes.push_back(value);
         }
         return bytes;
     }
@@ -178,12 +184,26 @@ public:
             return;
         }
 
-        string encodedBits;
+        // 先读取整个文件内容
+        vector<unsigned char> fileContent;
         char byte;
         while (inFile.get(byte)) {
-            encodedBits += huffmanCodes[static_cast<unsigned char>(byte)];
+            fileContent.push_back(static_cast<unsigned char>(byte));
         }
         inFile.close();
+
+        // 按照文件顺序生成编码串
+        string encodedBits;
+        for (unsigned char byte : fileContent) {
+            if (huffmanCodes.find(byte) != huffmanCodes.end()) {
+                encodedBits += huffmanCodes[byte];
+            }
+        }
+
+        // 确保编码长度是8的倍数
+        while (encodedBits.length() % 8 != 0) {
+            encodedBits += '0';  // 在末尾补0
+        }
 
         // 转换为字节
         vector<unsigned char> encodedBytes = binaryStringToBytes(encodedBits);
