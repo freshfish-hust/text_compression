@@ -28,10 +28,11 @@ private:
 
     // 堆的比较函数：词频小的优先，词频相同时按字节值排序
     static bool compareNodes(HuffmanNode* a, HuffmanNode* b) {
-        if (a->frequency == b->frequency) {
-            return a->byte < b->byte;  // 词频相同时，字节值小的优先
+        if (a->frequency != b->frequency) {
+            return a->frequency < b->frequency;  // 词频小的优先
         }
-        return a->frequency < b->frequency;  // 词频小的优先
+        // 词频相同时，按字节值排序
+        return a->byte < b->byte;
     }
     
     // 向下调整堆
@@ -98,6 +99,9 @@ private:
             string byte = binaryStr.substr(i, 8);
             // 补足8位
             while (byte.length() < 8) byte += "0";
+
+            //cout<<"byte:"<<byte<<endl;
+            
             bytes.push_back(static_cast<unsigned char>(stoi(byte, nullptr, 2)));
         }
         return bytes;
@@ -114,7 +118,91 @@ private:
         return hash;
     }
 
+    // 将二进制位串写入文件
+    void writeBitsToFile(const string& bits, ofstream& outFile) {
+        for (size_t i = 0; i < bits.length(); i += 8) {
+            string byte = bits.substr(i, std::min<size_t>(8ul, bits.length() - i));
+            while (byte.length() < 8) {
+                byte += '0';  // 在末尾补0
+            }
+            unsigned char value = static_cast<unsigned char>(stoi(byte, nullptr, 2));
+            outFile.write(reinterpret_cast<const char*>(&value), 1);
+        }
+    }
+
+    void siftUp(int index) {
+        while (index > 0) {
+            int parent = (index - 1) / 2;
+            if (compareNodes(heap[index], heap[parent])) {
+                swap(heap[index], heap[parent]);
+                index = parent;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // 修改插入节点的方法
+    void insertNode(HuffmanNode* node) {
+        heap.push_back(node);
+        siftUp(heap.size() - 1);
+    }
+
 public:
+
+    bool generateCompressedFile(const string& inputFilename) {
+        // 构造输出文件名
+        string outputFilename = inputFilename;
+        size_t lastDot = outputFilename.find_last_of('.');
+        if (lastDot != string::npos) {
+            outputFilename = outputFilename.substr(0, lastDot);
+        }
+        outputFilename += ".hfm";
+
+        ofstream outFile(outputFilename, ios::binary);
+        if (!outFile) {
+            cerr << "无法创建压缩文件：" << outputFilename << endl;
+            return false;
+        }
+
+        // 读取输入文件并编码
+        ifstream inFile(inputFilename, ios::binary);
+        if (!inFile) {
+            cerr << "无法打开源文件：" << inputFilename << endl;
+            return false;
+        }
+
+        // 写入文件头部信息
+        // 1. 原文件大小（8字节）
+        long fileSize = getFileSize(inputFilename);
+        outFile.write(reinterpret_cast<const char*>(&fileSize), sizeof(fileSize));
+
+        // 2. 写入编码后的内容
+        string encodedBits;
+        char byte;
+        while (inFile.get(byte)) {
+            encodedBits += huffmanCodes[static_cast<unsigned char>(byte)];
+            // 当累积的位数足够多时，写入文件
+            if (encodedBits.length() >= 1024) {
+                writeBitsToFile(encodedBits.substr(0, encodedBits.length() - encodedBits.length() % 8), outFile);
+                encodedBits = encodedBits.substr(encodedBits.length() - encodedBits.length() % 8);
+            }
+        }
+
+        // 写入剩余的位
+        if (!encodedBits.empty()) {
+            writeBitsToFile(encodedBits, outFile);
+        }
+
+        inFile.close();
+        outFile.close();
+
+        cout << "\n压缩文件已生成：" << outputFilename << endl;
+        cout << "原文件大小：" << fileSize << " 字节" << endl;
+        cout << "压缩文件大小：" << getFileSize(outputFilename) << " 字节" << endl;
+
+        return true;
+    }
 
     void generateCodeTable(const string& filename, HuffmanNode* root) {
         // 生成哈夫曼编码
@@ -138,9 +226,15 @@ public:
             string code = pair.second;
             unsigned char codeLength = static_cast<unsigned char>(code.length());
             
+            cout << "字符 '" << byte << "' (" << (int)pair.first << "): " 
+         << code << " (长度: " << code.length() << ")" << endl;
+
             // 将编码转换为字节
             vector<unsigned char> codeBytes = binaryStringToBytes(code);
-            
+            cout<<"codeBytes.size():"<<codeBytes.size()<<endl;
+            cout << "codeBytes[0] (hex): 0x" << hex << uppercase << setw(2) 
+             << setfill('0') << static_cast<int>(codeBytes[0]) << dec << endl;
+
             // 写入字节值
             codeFile.write(reinterpret_cast<const char*>(&byte), 1);
             // 写入编码长度
@@ -234,34 +328,39 @@ public:
 
     // 构建哈夫曼树
     HuffmanNode* buildHuffmanTree(const vector<pair<unsigned char, int>>& frequencies) {
+        
+        heap.clear();
+
         // 初始化堆
         for (const auto& pair : frequencies) {
-            heap.push_back(new HuffmanNode(pair.first, pair.second));
+            insertNode(new HuffmanNode(pair.first, pair.second));
         }
-        
-        // 建立最小堆
-        buildMinHeap();
-        
+
         // 构建哈夫曼树
         while (heap.size() > 1) {
+            // 取出两个最小节点
             HuffmanNode* left = extractMin();
             HuffmanNode* right = extractMin();
-            
-            // 创建新的父节点，频率为子节点之和
-            // 父节点的字节值取两个子节点中的最大值
-            unsigned char maxByte = max(left->byte, right->byte);
-            HuffmanNode* parent = new HuffmanNode(maxByte, 
-                                                left->frequency + right->frequency);
-            
-            // 设置子节点（频率小的在左边）
+
+            // 创建新的父节点，使用较大的字节值
+            HuffmanNode* parent = new HuffmanNode(
+                max(left->byte, right->byte),
+                left->frequency + right->frequency
+            );
+
+            // 确保频率小的在左边，频率相同时字节值小的在左边
+            if (left->frequency > right->frequency || 
+                (left->frequency == right->frequency && left->byte > right->byte)) {
+                swap(left, right);
+            }
+
             parent->left = left;
             parent->right = right;
-            
-            // 将新节点添加到堆中
-            heap.push_back(parent);
-            heapify(0, heap.size());
+
+            // 使用上滤操作插入新节点
+            insertNode(parent);
         }
-        
+
         return heap.empty() ? nullptr : heap[0];
     }
     
@@ -353,6 +452,9 @@ int main() {
      
      // 显示压缩后的最后16个字节
     huffman.encodeAndShowLast16Bytes(filename);
+
+    // 生成压缩文件
+    huffman.generateCompressedFile(filename);
 
     return 0;
 }
