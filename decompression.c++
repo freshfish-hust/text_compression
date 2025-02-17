@@ -186,7 +186,7 @@ int main() {
     getline(cin, compressedFile);
 
     // 构造编码表文件路径
-    string codeTableFile = "code.txt";
+    string codeTableFile = "code_bin.txt";
 
     // 加载编码表并构建解码树
     if (!decompressor.loadCodeTable(codeTableFile)) {
