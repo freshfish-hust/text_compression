@@ -100,7 +100,6 @@ private:
             // 补足8位
             while (byte.length() < 8) byte += "0";
 
-            //cout<<"byte:"<<byte<<endl;
             
             bytes.push_back(static_cast<unsigned char>(stoi(byte, nullptr, 2)));
         }
@@ -116,6 +115,27 @@ private:
             hash *= FNV1A_64_PRIME;
         }
         return hash;
+    }
+    // 计算文件的hash值
+    uint64_t calculateFileHash(const string& filename) {
+        ifstream file(filename, ios::binary);
+        if (!file) {
+            cerr << "无法打开文件进行哈希计算：" << filename << endl;
+            return 0;
+        }
+
+        // 获取文件大小
+        file.seekg(0, ios::end);
+        size_t fileSize = file.tellg();
+        file.seekg(0, ios::beg);
+
+        // 读取文件内容
+        vector<uint8_t> buffer(fileSize);
+        file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
+        file.close();
+
+        // 计算哈希值
+        return fnv1a_64(buffer.data(), fileSize);
     }
 
     // 将二进制位串写入文件
@@ -290,14 +310,8 @@ public:
             string code = pair.second;
             unsigned char codeLength = static_cast<unsigned char>(code.length());
             
-            cout << "字符 '" << byte << "' (" << (int)pair.first << "): " 
-         << code << " (长度: " << code.length() << ")" << endl;
-
             // 将编码转换为字节
             vector<unsigned char> codeBytes = binaryStringToBytes(code);
-            cout<<"codeBytes.size():"<<codeBytes.size()<<endl;
-            cout << "codeBytes[0] (hex): 0x" << hex << uppercase << setw(2) 
-             << setfill('0') << static_cast<int>(codeBytes[0]) << dec << endl;
 
             // 写入字节值
             codeFile.write(reinterpret_cast<const char*>(&byte), 1);
@@ -354,7 +368,7 @@ public:
         // 显示编码信息
         cout << "\n压缩编码信息：" << endl;
         cout << "总字节数: " << encodedBytes.size() << endl;
-        cout << "FNV-1a哈希值: 0x" << hex << uppercase << hash << dec << endl;
+        cout << "压缩后FNV-1a哈希值: 0x" << hex << uppercase << hash << dec << endl;
 
         // 显示最后16个字节
         cout << "\n压缩后文件的最后16个字节：" << hex << uppercase;
@@ -472,6 +486,11 @@ public:
         return (1.0 - static_cast<double>(wpl) / originalSize) * 100;
     }
 
+     // 添加公共接口用于单独计算文件哈希值
+     uint64_t getFileHash(const string& filename) {
+        return calculateFileHash(filename);
+    }
+
 };
 
 
@@ -492,10 +511,12 @@ int main() {
         cout << "文件为空或无法读取！" << endl;
         return 1;
     }
-
+    uint64_t origin_hash = huffman.getFileHash(filename);
     // 打印文件基本信息
     cout << "\n文件大小: " << huffman.getFileSize(filename) << " 字节" << endl;
     cout << "不同字符数量: " << frequencies.size() << endl << endl;
+    cout << "文件哈希值: 0x" << hex << uppercase << setfill('0') 
+         << setw(16) << origin_hash << dec << endl;
     
     // 打印排序后的词频统计
     huffman.printFrequencyStats(frequencies);

@@ -3,8 +3,12 @@
 #include <string>
 #include <vector>
 #include <map>
+#include<chrono> //添加计时器
+#include <iomanip>
+#define FNV1A_64_INIT 0xcbf29ce484222325ULL
+#define FNV1A_64_PRIME 0x100000001b3
 using namespace std;
-
+using namespace chrono; //使用chrono命名空间
 // 定义解码树节点结构
 struct DecodeNode {
     unsigned char byte;     // 字节值
@@ -19,6 +23,38 @@ struct DecodeNode {
 class HuffmanDecompression {
 private:
     DecodeNode* root;      // 解码树根节点
+
+    //添加FNV-1a哈希计算函数
+    uint64_t fnv1a_64(const void *data, size_t length) {
+        uint64_t hash = FNV1A_64_INIT;
+        const uint8_t *byte_data = (const uint8_t *)data;
+        for (size_t i = 0; i < length; i++) {
+            hash ^= byte_data[i];
+            hash *= FNV1A_64_PRIME;
+        }
+        return hash;
+    }
+    //计算文件的hash值
+    uint64_t calculateFileHash(const string& filename) {
+        ifstream file(filename, ios::binary);
+        if (!file) {
+            cerr << "无法打开文件进行哈希计算：" << filename << endl;
+            return 0;
+        }
+
+        // 获取文件大小
+        file.seekg(0, ios::end);
+        size_t fileSize = file.tellg();
+        file.seekg(0, ios::beg);
+
+        // 读取文件内容
+        vector<uint8_t> buffer(fileSize);
+        file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
+        file.close();
+
+        // 计算哈希值
+        return fnv1a_64(buffer.data(), fileSize);
+    }
 
     // 从编码表构建解码树
     void buildDecodeTree(unsigned char byte, const string& code) {
@@ -141,7 +177,8 @@ public:
             cerr << "无法创建解压文件！" << endl;
             return false;
         }
-
+        //开始计时
+        auto startTime = high_resolution_clock::now();
         // 解码并写入文件
         DecodeNode* current = root;
         long decodedSize = 0;
@@ -170,11 +207,28 @@ public:
 
         inFile.close();
         outFile.close();
+        //结束计时
+        auto endTime = high_resolution_clock::now();
+        auto durationMilli = duration_cast<milliseconds>(endTime - startTime);
+        auto durationMicro = duration_cast<microseconds>(endTime - startTime);
+        // 计算解压后文件的哈希值
+        uint64_t decompressedHash = calculateFileHash(outputPath);
+
+        
         // 在解压函数中添加调试输出
         cout << "原文件大小: " << originalSize << " 字节" << endl;
         cout << "已解码大小: " << decodedSize << " 字节" << endl;
+        cout << "解压耗时: " << durationMilli.count() << " 毫秒" << endl;
+        cout << "       : "<<durationMicro.count()<<" 微秒"<<endl;
+        cout << "解压文件哈希值: 0x" << hex << uppercase << setfill('0') 
+             << setw(16) << decompressedHash << dec << endl;
         cout << "解压完成！文件已保存为：" << outputPath << endl;
         return true;
+    }
+
+     // 添加公共接口用于单独计算文件哈希值
+     uint64_t getFileHash(const string& filename) {
+        return calculateFileHash(filename);
     }
 };
 
