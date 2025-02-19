@@ -20,7 +20,13 @@ struct HuffmanNode {
     HuffmanNode(unsigned char b, int freq) : 
         byte(b), frequency(freq), left(nullptr), right(nullptr) {}
 };
-
+// 添加用户信息结构体：
+struct UserInfo {
+    string senderID;      // 发送方学号
+    string senderName;    // 发送方姓名
+    string receiverID;    // 接收方学号
+    string receiverName;  // 接收方姓名
+};
 class HuffmanCompression {
 private:
     vector<HuffmanNode*> heap;
@@ -168,7 +174,66 @@ private:
         siftUp(heap.size() - 1);
     }
 
+    vector<unsigned char> userInfoToBytes(const UserInfo& info) {
+        vector<unsigned char> bytes;
+        
+        // 添加每个字段的长度和内容
+        for (const string& field : {info.senderID, info.senderName, 
+                                info.receiverID, info.receiverName}) {
+            uint16_t length = static_cast<uint16_t>(field.length());
+            bytes.push_back(length & 0xFF);
+            bytes.push_back((length >> 8) & 0xFF);
+            
+            for (char c : field) {
+                bytes.push_back(static_cast<unsigned char>(c));
+            }
+        }
+        
+        return bytes;
+    }
+
 public:
+
+    // 在原文件前添加用户信息并返回新文件路径
+    string addUserInfoToFile(const string& inputFilename, const UserInfo& userInfo) {
+        // 创建临时文件名
+        string newFilename = inputFilename;
+        size_t lastDot = newFilename.find_last_of('.');
+        if (lastDot != string::npos) {
+            newFilename = newFilename.substr(0, lastDot) + "_added" + 
+                         newFilename.substr(lastDot);
+        } else {
+            newFilename += "_added";
+        }
+    
+        ofstream tempFile(newFilename, ios::binary);
+        if (!tempFile) {
+            cerr << "无法创建添加用户信息的文件" << endl;
+            return "";
+        }
+
+        // 写入用户信息头部
+        tempFile << "发送方学号: " << userInfo.senderID << "\n";
+        tempFile << "发送方姓名: " << userInfo.senderName << "\n";
+        tempFile << "接收方学号: " << userInfo.receiverID << "\n";
+        tempFile << "接收方姓名: " << userInfo.receiverName << "\n";
+        tempFile << "------------------------\n";
+
+        // 复制原文件内容
+        ifstream inFile(inputFilename, ios::binary);
+        if (!inFile) {
+            cerr << "无法打开源文件" << endl;
+            tempFile.close();
+            return "";
+        }
+
+        tempFile << inFile.rdbuf();
+        
+        inFile.close();
+        tempFile.close();
+        
+        return newFilename;
+    }
 
     // 整理code_bin.txt文件
     void formatCodeTable() {
@@ -248,6 +313,9 @@ public:
             cerr << "无法创建压缩文件：" << outputFilename << endl;
             return false;
         }
+        // vector<unsigned char> userInfoBytes = userInfoToBytes(userInfo);
+        // outFile.write(reinterpret_cast<const char*>(userInfoBytes.data()), 
+        //              userInfoBytes.size());
 
         // 读取输入文件并编码
         ifstream inFile(inputFilename, ios::binary);
@@ -256,11 +324,7 @@ public:
             return false;
         }
 
-        // 写入文件头部信息
-        // 1. 原文件大小（8字节）
-        // long fileSize = getFileSize(inputFilename);
-        // outFile.write(reinterpret_cast<const char*>(&fileSize), sizeof(fileSize));
-
+        
         // 2. 写入编码后的内容
         string encodedBits;
         char byte;
@@ -282,7 +346,6 @@ public:
         outFile.close();
 
         cout << "\n压缩文件已生成：" << outputFilename << endl;
-        //cout << "原文件大小：" << fileSize << " 字节" << endl;
         cout << "压缩文件大小：" << getFileSize(outputFilename) << " 字节" << endl;
 
         return true;
@@ -500,24 +563,51 @@ public:
 int main() {
     HuffmanCompression huffman;
     string filename;
-    
+    UserInfo userInfo;
     cout << "请输入要压缩的文件路径: ";
     std::getline(cin, filename);
+  
+   
+    uint64_t origin_hash = huffman.getFileHash(filename);
 
-    // 获取词频统计
-    vector<pair<unsigned char, int>> frequencies = huffman.getFrequenciesFromFile(filename);
-    
-    if (frequencies.empty()) {
-        cout << "文件为空或无法读取！" << endl;
+    // 打印文件基本信息
+    cout << "原始文件哈希值: 0x" << hex << uppercase << setfill('0') 
+         << setw(16) << origin_hash << dec << endl;
+
+    cout << "\n请输入发送方信息：" << endl;
+    cout << "学号: ";
+    getline(cin, userInfo.senderID);
+    cout << "姓名: ";
+    getline(cin, userInfo.senderName);
+
+    cout << "\n请输入接收方信息：" << endl;
+    cout << "学号: ";
+    getline(cin, userInfo.receiverID);
+    cout << "姓名: ";
+    getline(cin, userInfo.receiverName);
+
+    // 创建带有用户信息的新文件
+    string processedFile = huffman.addUserInfoToFile(filename, userInfo);
+    if (processedFile.empty()) {
+        cout << "处理文件失败！" << endl;
         return 1;
     }
-    uint64_t origin_hash = huffman.getFileHash(filename);
-    // 打印文件基本信息
-    cout << "\n文件大小: " << huffman.getFileSize(filename) << " 字节" << endl;
-    cout << "不同字符数量: " << frequencies.size() << endl << endl;
-    cout << "文件哈希值: 0x" << hex << uppercase << setfill('0') 
-         << setw(16) << origin_hash << dec << endl;
+
+    // 计算添加信息后的哈希值
+    uint64_t processed_hash = huffman.getFileHash(processedFile);
+    cout << "\n添加用户信息后的文件哈希值: 0x" << hex << uppercase << setfill('0') 
+         << setw(16) << processed_hash << dec << endl;
     
+     // 获取词频统计 用于处理后的文件
+     vector<pair<unsigned char, int>> frequencies = huffman.getFrequenciesFromFile(processedFile);
+    
+     if (frequencies.empty()) {
+         cout << "文件为空或无法读取！" << endl;
+         return 1;
+     }
+    
+    cout << "\n处理后文件大小: " << huffman.getFileSize(processedFile) << " 字节" << endl;
+    cout << "不同字符数量: " << frequencies.size() << endl << endl;
     // 打印排序后的词频统计
     huffman.printFrequencyStats(frequencies);
     
@@ -528,20 +618,23 @@ int main() {
     int wpl = huffman.calculateWPL(root);
     cout << "\n哈夫曼树的WPL值：" << wpl << endl;
     
-    double compressionRatio = huffman.calculateCompressionRatio(filename, wpl);
+    double compressionRatio = huffman.calculateCompressionRatio(processedFile, wpl);
     cout << "预计压缩率：" << fixed << setprecision(2) << compressionRatio << "%" << endl;
     
      // 生成编码表文件
-    huffman.generateCodeTable(filename, root);
+    huffman.generateCodeTable(processedFile, root);
     
      // 显示编码表内容
     huffman.displayCodeTable();
      
      // 显示压缩后的最后16个字节
-    huffman.encodeAndShowLast16Bytes(filename);
+    huffman.encodeAndShowLast16Bytes(processedFile);
 
     // 生成压缩文件
-    huffman.generateCompressedFile(filename);
+    huffman.generateCompressedFile(processedFile);
+    
+     // 清理临时文件
+    remove(processedFile.c_str());
 
     return 0;
 }
