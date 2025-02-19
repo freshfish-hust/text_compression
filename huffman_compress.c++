@@ -258,8 +258,8 @@ public:
 
         // 写入文件头部信息
         // 1. 原文件大小（8字节）
-        long fileSize = getFileSize(inputFilename);
-        outFile.write(reinterpret_cast<const char*>(&fileSize), sizeof(fileSize));
+        // long fileSize = getFileSize(inputFilename);
+        // outFile.write(reinterpret_cast<const char*>(&fileSize), sizeof(fileSize));
 
         // 2. 写入编码后的内容
         string encodedBits;
@@ -282,7 +282,7 @@ public:
         outFile.close();
 
         cout << "\n压缩文件已生成：" << outputFilename << endl;
-        cout << "原文件大小：" << fileSize << " 字节" << endl;
+        //cout << "原文件大小：" << fileSize << " 字节" << endl;
         cout << "压缩文件大小：" << getFileSize(outputFilename) << " 字节" << endl;
 
         return true;
