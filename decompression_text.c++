@@ -10,7 +10,13 @@
 #define FNV1A_64_PRIME 0x100000001b3
 using namespace std;
 using namespace chrono;
-
+// 用户信息
+struct UserInfo {
+    string senderID;
+    string senderName;
+    string receiverID;
+    string receiverName;
+};
 // 解码树节点结构
 struct DecodeNode {
     unsigned char byte;
@@ -26,6 +32,9 @@ class HuffmanDecompression {
 private:
     DecodeNode* root;
     long originalFileSize;
+    UserInfo userInfo;
+    static const int ID_LENGTH = 10;        // 学号固定长度
+    static const int MAX_NAME_LENGTH = 20;  // 姓名最大长度
 
     uint64_t fnv1a_64(const void *data, size_t length) {
         uint64_t hash = FNV1A_64_INIT;
@@ -103,6 +112,170 @@ private:
         }
     }
 
+    // 从identity.txt读取接收者信息
+    bool loadIdentityInfo(string& id, string& name) {
+        const int ID_LENGTH = 10;        // 学号固定长度
+        const int MAX_NAME_LENGTH = 20;  // 姓名最大长度
+    
+        ifstream idFile("identity.txt");
+        if (!idFile) {
+            cerr << "无法打开身份配置文件 identity.txt" << endl;
+            return false;
+        }
+
+        string line;
+        bool hasId = false, hasName = false;
+        
+        while (getline(idFile, line)) {
+            if (line.substr(0, 3) == "id=") {
+                id = line.substr(3);
+                // 验证学号长度
+                if (id.length() != ID_LENGTH) {
+                    cerr << "错误：学号必须是" << ID_LENGTH << "位！当前长度：" 
+                         << id.length() << endl;
+                    idFile.close();
+                    return false;
+                }
+                hasId = true;
+            } 
+            else if (line.substr(0, 5) == "name=") {
+                name = line.substr(5);
+                // 验证姓名长度
+                if (name.empty() || name.length() > MAX_NAME_LENGTH) {
+                    cerr << "错误：姓名长度必须在1-" << MAX_NAME_LENGTH << "个字符之间！当前长度：" 
+                         << name.length() << endl;
+                    idFile.close();
+                    return false;
+                }
+                hasName = true;
+            }
+        }
+        
+        idFile.close();
+        
+        if (!hasId || !hasName) {
+            cerr << "错误：identity.txt 文件格式不正确！" << endl;
+            cerr << "必须包含 id=和name=行" << endl;
+            return false;
+        }
+        
+        return true;
+    }
+
+// 从压缩文件读取用户信息
+    bool readUserInfo(ifstream& file,DecodeNode* root) {
+
+        // 使用哈夫曼解码读取用户信息
+        string decodedInfo;
+        DecodeNode* current = root;
+        char byte;
+        bool foundSeparator = false;
+
+        while (file.get(byte) && !foundSeparator) {
+            unsigned char curByte = static_cast<unsigned char>(byte);
+            for (int bitPos = 7; bitPos >= 0; bitPos--) {
+                bool bit = (curByte >> bitPos) & 1;
+                current = bit ? current->right : current->left;
+
+                if (current && current->isLeaf) {
+                    decodedInfo += current->byte;
+                    current = root;
+                    
+                    // 检查是否找到分隔符
+                    if (decodedInfo.length() >= 24) {  // "------------------------" 的长度
+                        size_t pos = decodedInfo.find("------------------------");
+                        if (pos != string::npos) {
+                            decodedInfo = decodedInfo.substr(0, pos + 24);  // 保留分隔符
+                            foundSeparator = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+
+        // 在处理用户信息之前添加调试输出
+        cout << "解码后的原始信息：\n" << decodedInfo << endl;
+
+        // 解析用户信息
+        stringstream userInfoStream(decodedInfo);
+        string line;
+        int count = 0;
+        
+        while (count < 5 && getline(userInfoStream, line)) {
+            if (count == 0 && line.find("发送方学号: ") == 0) {
+                userInfo.senderID = line.substr(17);  // 17是"发送方学号: "的长度
+                cout<<"senderID:"<<userInfo.senderID<<endl;
+                cout << "发送方学号长度: " << userInfo.senderID.length() << endl;  // 调试输出
+                if (userInfo.senderID.length() != ID_LENGTH) {
+                    cerr << "发送方学号长度错误，当前长度：" << userInfo.senderID.length() 
+                         << "，期望长度：" << ID_LENGTH << endl;
+                    return false;
+                }
+                count++;
+            }
+            else if (count == 1 && line.find("发送方姓名: ") == 0) {
+                userInfo.senderName = line.substr(17);
+                if (userInfo.senderName.empty() || userInfo.senderName.length() > MAX_NAME_LENGTH) {
+                    cerr << "发送方姓名长度错误" << endl;
+                    return false;
+                }
+                count++;
+            }
+            else if (count == 2 && line.find("接收方学号: ") == 0) {
+                userInfo.receiverID = line.substr(17);
+                if (userInfo.receiverID.length() != ID_LENGTH) {
+                    cerr << "接收方学号长度错误" << endl;
+                    return false;
+                }
+                count++;
+            }
+            else if (count == 3 && line.find("接收方姓名: ") == 0) {
+                userInfo.receiverName = line.substr(17);
+                if (userInfo.receiverName.empty() || userInfo.receiverName.length() > MAX_NAME_LENGTH) {
+                    cerr << "接收方姓名长度错误" << endl;
+                    return false;
+                }
+                count++;
+            }
+            else if (line.find("------------------------") == 0) {
+                count++;
+            }
+        }
+
+        if (count < 5) {
+            cerr << "用户信息不完整" << endl;
+            return false;
+        }
+
+        cout << "\n读取到的用户信息：" << endl;
+        cout << "发送方：" << userInfo.senderID << " - " << userInfo.senderName << endl;
+        cout << "接收方：" << userInfo.receiverID << " - " << userInfo.receiverName << endl;
+
+        return true;
+    }
+
+    // 验证用户身份
+    bool verifyIdentity() {
+        string configID, configName;
+        if (!loadIdentityInfo(configID, configName)) {
+            return false;
+        }
+
+        if (userInfo.receiverID != configID || userInfo.receiverName != configName) {
+            cerr << "\n身份验证失败！" << endl;
+            cerr << "压缩文件中的接收者信息：" << endl;
+            cerr << "学号: " << userInfo.receiverID << endl;
+            cerr << "姓名: " << userInfo.receiverName << endl;
+            cerr << "\n本地配置的身份信息：" << endl;
+            cerr << "学号: " << configID << endl;
+            cerr << "姓名: " << configName << endl;
+            return false;
+        }
+        return true;
+    }
+
 public:
     HuffmanDecompression() : root(nullptr) {}
     ~HuffmanDecompression() {
@@ -160,6 +333,23 @@ public:
             return false;
         }
 
+        // 读取并验证用户信息
+        if (!readUserInfo(inFile,root)) {
+            cerr << "无法读取用户信息！" << endl;
+            return false;
+        }
+
+        // 验证身份
+        if (!verifyIdentity()) {
+            cerr << "身份验证失败，停止解压！" << endl;
+            return false;
+        }
+
+        cout << "\n身份验证成功！" << endl;
+        cout << "发送方信息：" << userInfo.senderID << " - " << userInfo.senderName << endl;
+        cout << "接收方信息：" << userInfo.receiverID << " - " << userInfo.receiverName << endl;
+        
+        inFile.seekg(0);//将文件指针移动到文件开头
         string outputPath = compressedPath;
         size_t lastDot = outputPath.find_last_of('.');
         if (lastDot != string::npos) {
