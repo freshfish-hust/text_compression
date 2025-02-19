@@ -192,6 +192,18 @@ private:
         return bytes;
     }
 
+    // 显示文件统计信息
+    void displayFileStats(const string& filename, const vector<pair<unsigned char, int>>& frequencies) {
+        cout << "\n处理后文件大小: " << getFileSize(filename) << " 字节" << endl;
+        cout << "不同字符数量: " << frequencies.size() << endl << endl;
+        printFrequencyStats(frequencies);
+    }
+    // 显示压缩统计信息
+    void displayCompressionStats(const string& filename, int wpl) {
+        cout << "\n哈夫曼树的WPL值：" << wpl << endl;
+        double compressionRatio = calculateCompressionRatio(filename, wpl);
+        cout << "预计压缩率：" << fixed << setprecision(2) << compressionRatio << "%" << endl;
+    }
 public:
 
     // 在原文件前添加用户信息并返回新文件路径
@@ -554,6 +566,57 @@ public:
         return calculateFileHash(filename);
     }
 
+    // 压缩处理的统一接口
+    bool compressFile(const string& filename, const UserInfo& userInfo, bool is_encrypted = false){
+    
+        uint64_t origin_hash = getFileHash(filename);
+        // 打印文件基本信息
+        cout << "原始文件哈希值: 0x" << hex << uppercase << setfill('0') 
+         << setw(16) << origin_hash << dec << endl;
+        // 创建带有用户信息的新文件
+        string processedFile = addUserInfoToFile(filename, userInfo);
+        if (processedFile.empty()) {
+            cout << "处理文件失败！" << endl;
+            return false;
+        }
+        // 计算添加信息后的哈希值
+        uint64_t processed_hash = getFileHash(processedFile);
+        cout << "\n添加用户信息后的文件哈希值: 0x" << hex << uppercase << setfill('0') 
+         << setw(16) << processed_hash << dec << endl;
+        // 获取词频统计 用于处理后的文件
+        vector<pair<unsigned char, int>> frequencies = getFrequenciesFromFile(processedFile);
+    
+        if (frequencies.empty()) {
+            cout << "文件为空或无法读取！" << endl;
+            remove(processedFile.c_str());
+            return false;
+        }
+        displayFileStats(processedFile, frequencies);
+
+        // 5. 构建哈夫曼树并生成编码
+        HuffmanNode* root = buildHuffmanTree(frequencies);
+        int wpl = calculateWPL(root);
+        displayCompressionStats(processedFile, wpl);
+        // 6. 生成编码表
+        generateCodeTable(processedFile, root);
+        displayCodeTable();
+        // 7. 如果需要加密，在这里添加加密处理
+        if (is_encrypted) {
+            // TODO: 添加加密逻辑
+            cout << "加密功能待实现..." << endl;
+        }
+        // 8. 压缩文件
+        if (!generateCompressedFile(processedFile)) {
+            cerr << "生成压缩文件失败！" << endl;
+            remove(processedFile.c_str());
+            return false;
+        }
+        // 9. 显示压缩结果
+        encodeAndShowLast16Bytes(processedFile);
+        // 10. 清理临时文件
+        remove(processedFile.c_str());
+        return true;
+    }
 };
 
 
@@ -564,77 +627,34 @@ int main() {
     HuffmanCompression huffman;
     string filename;
     UserInfo userInfo;
+    char choice;
+    //1. 读取文件路径
     cout << "请输入要压缩的文件路径: ";
     std::getline(cin, filename);
   
-   
-    uint64_t origin_hash = huffman.getFileHash(filename);
-
-    // 打印文件基本信息
-    cout << "原始文件哈希值: 0x" << hex << uppercase << setfill('0') 
-         << setw(16) << origin_hash << dec << endl;
-
-    cout << "\n请输入发送方信息：" << endl;
+    //2. 读取用户信息
+    cout << "\n请输入发送方信息: " << endl;
     cout << "学号: ";
     getline(cin, userInfo.senderID);
     cout << "姓名: ";
     getline(cin, userInfo.senderName);
 
-    cout << "\n请输入接收方信息：" << endl;
+    cout << "\n请输入接收方信息: " << endl;
     cout << "学号: ";
     getline(cin, userInfo.receiverID);
     cout << "姓名: ";
     getline(cin, userInfo.receiverName);
 
-    // 创建带有用户信息的新文件
-    string processedFile = huffman.addUserInfoToFile(filename, userInfo);
-    if (processedFile.empty()) {
-        cout << "处理文件失败！" << endl;
+    // 3. 询问是否需要加密
+    cout << "\n是否需要加密压缩?(Y/N,默认N): ";
+    choice = cin.get();
+    bool is_encrypted = (toupper(choice) == 'Y');
+
+    // 4. 执行压缩处理
+    if (!huffman.compressFile(filename, userInfo, is_encrypted)) {
         return 1;
     }
 
-    // 计算添加信息后的哈希值
-    uint64_t processed_hash = huffman.getFileHash(processedFile);
-    cout << "\n添加用户信息后的文件哈希值: 0x" << hex << uppercase << setfill('0') 
-         << setw(16) << processed_hash << dec << endl;
-    
-     // 获取词频统计 用于处理后的文件
-     vector<pair<unsigned char, int>> frequencies = huffman.getFrequenciesFromFile(processedFile);
-    
-     if (frequencies.empty()) {
-         cout << "文件为空或无法读取！" << endl;
-         return 1;
-     }
-    
-    cout << "\n处理后文件大小: " << huffman.getFileSize(processedFile) << " 字节" << endl;
-    cout << "不同字符数量: " << frequencies.size() << endl << endl;
-    // 打印排序后的词频统计
-    huffman.printFrequencyStats(frequencies);
-    
-    // 构建哈夫曼树
-    HuffmanNode* root = huffman.buildHuffmanTree(frequencies);
-    
-    // 计算并打印WPL和压缩率
-    int wpl = huffman.calculateWPL(root);
-    cout << "\n哈夫曼树的WPL值：" << wpl << endl;
-    
-    double compressionRatio = huffman.calculateCompressionRatio(processedFile, wpl);
-    cout << "预计压缩率：" << fixed << setprecision(2) << compressionRatio << "%" << endl;
-    
-     // 生成编码表文件
-    huffman.generateCodeTable(processedFile, root);
-    
-     // 显示编码表内容
-    huffman.displayCodeTable();
-     
-     // 显示压缩后的最后16个字节
-    huffman.encodeAndShowLast16Bytes(processedFile);
-
-    // 生成压缩文件
-    huffman.generateCompressedFile(processedFile);
-    
-     // 清理临时文件
-    remove(processedFile.c_str());
-
+    cout << "\n压缩处理完成!" << endl;
     return 0;
 }
