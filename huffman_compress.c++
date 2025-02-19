@@ -192,6 +192,34 @@ private:
         return bytes;
     }
 
+    // 加密文件内容（每个字节加上0x55）
+    string encryptFile(const string& inputFile) {
+        string encryptedFile = inputFile;
+        size_t lastDot = encryptedFile.find_last_of('.');
+        if (lastDot != string::npos) {
+            encryptedFile = encryptedFile.substr(0, lastDot) + "_ecp" + encryptedFile.substr(lastDot);
+        } else {
+            encryptedFile += "_ecp";
+        }
+        ifstream inFile(inputFile, ios::binary);
+        ofstream outFile(encryptedFile, ios::binary);
+        
+        if (!inFile || !outFile) {
+            cerr << "加密过程中打开文件失败" << endl;
+            return "";
+        }
+
+        char byte;
+        while (inFile.get(byte)) {
+            byte = byte + 0x55;
+            outFile.put(byte);
+        }
+
+        inFile.close();
+        outFile.close();
+        return encryptedFile;
+    }
+
     // 显示文件统计信息
     void displayFileStats(const string& filename, const vector<pair<unsigned char, int>>& frequencies) {
         cout << "\n处理后文件大小: " << getFileSize(filename) << " 字节" << endl;
@@ -595,25 +623,66 @@ public:
 
         // 5. 构建哈夫曼树并生成编码
         HuffmanNode* root = buildHuffmanTree(frequencies);
-        int wpl = calculateWPL(root);
-        displayCompressionStats(processedFile, wpl);
+        int ori_wpl = calculateWPL(root);
+        displayCompressionStats(processedFile, ori_wpl);
         // 6. 生成编码表
         generateCodeTable(processedFile, root);
         displayCodeTable();
         // 7. 如果需要加密，在这里添加加密处理
+        string fileToCompress = processedFile;
         if (is_encrypted) {
-            // TODO: 添加加密逻辑
-            cout << "加密功能待实现..." << endl;
+            cout << "\n开始加密处理..." << endl;
+            cout << "加密前WPL值：" << ori_wpl << endl;
+            
+            // 加密文件
+            string encryptedFile = encryptFile(processedFile);
+            if (encryptedFile.empty()) {
+                cerr << "加密失败！" << endl;
+                remove(processedFile.c_str());
+                return false;
+            }
+            
+            // 重新获取加密后的频率统计
+            frequencies = getFrequenciesFromFile(encryptedFile);
+            if (frequencies.empty()) {
+                cerr << "加密文件统计失败！" << endl;
+                remove(processedFile.c_str());
+                remove(encryptedFile.c_str());
+                return false;
+            }
+            
+            // 重新构建哈夫曼树
+            root = buildHuffmanTree(frequencies);
+            int ecp_wpl = calculateWPL(root);
+            
+            cout << "加密后WPL值：" << ecp_wpl << endl;
+            if (ecp_wpl != ori_wpl) {
+                cout << "警告：加密前后WPL值不一致！" << endl;
+            }
+            
+            // 更新编码表
+            generateCodeTable(encryptedFile, root);
+            displayCodeTable();
+            
+            // 使用加密后的文件进行压缩
+            fileToCompress = encryptedFile;
         }
+        
         // 8. 压缩文件
-        if (!generateCompressedFile(processedFile)) {
+        if (!generateCompressedFile(fileToCompress)) {
             cerr << "生成压缩文件失败！" << endl;
+            if (is_encrypted) {
+                remove(fileToCompress.c_str());
+            }
             remove(processedFile.c_str());
             return false;
         }
         // 9. 显示压缩结果
-        encodeAndShowLast16Bytes(processedFile);
+        encodeAndShowLast16Bytes(fileToCompress);
         // 10. 清理临时文件
+        if (is_encrypted) {
+            remove(fileToCompress.c_str());
+        }
         remove(processedFile.c_str());
         return true;
     }

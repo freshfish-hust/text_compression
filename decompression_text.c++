@@ -35,6 +35,67 @@ private:
     UserInfo userInfo;
     static const int ID_LENGTH = 10;        // 学号固定长度
     static const int MAX_NAME_LENGTH = 20;  // 姓名最大长度
+    //解密单个字节
+    char decryptByte(char byte) {
+        return byte - 0x55;
+    }
+    //解密文件内容
+    bool decryptContent(const string& inputPath, const string& outputPath) {
+        ifstream inFile(inputPath, ios::binary);
+        ofstream outFile(outputPath, ios::binary);
+        
+        if (!inFile || !outFile) {
+            cerr << "打开文件失败" << endl;
+            return false;
+        }
+
+        char byte;
+        while (inFile.get(byte)) {
+            outFile.put(decryptByte(byte));
+        }
+
+        inFile.close();
+        outFile.close();
+        return true;
+    }
+    // 解密并验证用户信息
+    bool readAndVerifyUserInfo(ifstream& file, DecodeNode* root, bool isEncrypted) {
+        string decodedInfo;
+        DecodeNode* current = root;
+        char byte;
+        int newlineCount = 0;
+
+        while (file.get(byte)) {
+
+            unsigned char curByte = static_cast<unsigned char>(byte);
+            for (int bitPos = 7; bitPos >= 0; bitPos--) {
+                bool bit = (curByte >> bitPos) & 1;
+                current = bit ? current->right : current->left;
+
+                if (current && current->isLeaf) {
+                    char decodedChar = current->byte;
+                    if (isEncrypted) {
+                    decodedChar = decryptByte(decodedChar);
+                }
+                    decodedInfo += decodedChar;
+                    current = root;
+
+                    if (decodedChar == '\n') {
+                        newlineCount++;
+                        if (newlineCount >= 4) {
+                           
+                            size_t pos = decodedInfo.find("------------------------");
+                            if (pos != string::npos) {
+                                decodedInfo = decodedInfo.substr(0, pos + 24);
+                                return parseUserInfo(decodedInfo);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
 
     uint64_t fnv1a_64(const void *data, size_t length) {
         uint64_t hash = FNV1A_64_INIT;
@@ -162,50 +223,6 @@ private:
         return true;
     }
 
-// 从压缩文件读取用户信息
-    bool readUserInfo(ifstream& file,DecodeNode* root) {
-
-        // 使用哈夫曼解码读取用户信息
-        string decodedInfo;
-        DecodeNode* current = root;
-        char byte;
-        int newlineCount = 0;
-        auto startTime = high_resolution_clock::now();  // 开始计时
-        while (file.get(byte)) {
-            unsigned char curByte = static_cast<unsigned char>(byte);
-            for (int bitPos = 7; bitPos >= 0; bitPos--) {
-                bool bit = (curByte >> bitPos) & 1;
-                current = bit ? current->right : current->left;
-    
-                if (current && current->isLeaf) {
-                    char decodedChar = current->byte;
-                    decodedInfo += decodedChar;
-                    current = root;
-    
-                    if (decodedChar == '\n') {
-                        newlineCount++;
-                        if (newlineCount >= 4) {  // 四行用户信息已读取完毕
-                           
-                            size_t pos = decodedInfo.find("------------------------", 
-                                       decodedInfo.length() - 30);  // 只在最后30个字符中查找
-                            if (pos != string::npos) {
-                                decodedInfo = decodedInfo.substr(0, pos + 24);
-                                auto endTime = high_resolution_clock::now();
-                                auto duration = duration_cast<microseconds>(endTime - startTime);
-                                cout << "用户信息解码耗时: " << duration.count() / 1000000.0 
-                                     << " 秒" << endl;
-                                return parseUserInfo(decodedInfo);  // 解析用户信息
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        cout<<"行数: "<<newlineCount<<endl;
-        cerr << "未找到完整的用户信息" << endl;
-        return false;
-
-    }
 
     // 验证用户身份
     bool verifyIdentity() {
@@ -277,10 +294,12 @@ private:
             cerr << "用户信息不完整" << endl;
             return false;
         }
-
-        // cout << "\n读取到的用户信息：" << endl;
-        // cout << "发送方：" << userInfo.senderID << " - " << userInfo.senderName << endl;
-        // cout << "接收方：" << userInfo.receiverID << " - " << userInfo.receiverName << endl;
+        // 进行身份验证
+        // 验证身份
+        if (!verifyIdentity()) {
+            cerr << "身份验证失败，停止解压！" << endl;
+            return false;
+        }
 
         return true;
     }
@@ -335,22 +354,15 @@ public:
     }
 
     // 解压缩文件
-    bool decompress(const string& compressedPath) {
+    bool decompress(const string& compressedPath, bool isEncrypted = false) {
         ifstream inFile(compressedPath, ios::binary);
         if (!inFile) {
             cerr << "无法打开压缩文件！" << endl;
             return false;
         }
-
-        // 读取并验证用户信息
-        if (!readUserInfo(inFile,root)) {
-            cerr << "无法读取用户信息！" << endl;
-            return false;
-        }
-
-        // 验证身份
-        if (!verifyIdentity()) {
-            cerr << "身份验证失败，停止解压！" << endl;
+        // 验证用户信息
+        if (!readAndVerifyUserInfo(inFile, root, isEncrypted)) {
+            cerr << "用户信息验证失败！" << endl;
             return false;
         }
 
@@ -380,6 +392,8 @@ public:
         unsigned char bitPos = 7;
 
         while (inFile.get(byte) && decodedSize < originalFileSize) {
+
+            // 如果是加密文件，先解密字节
             unsigned char curByte = static_cast<unsigned char>(byte);
             
             do {
@@ -387,7 +401,11 @@ public:
                 current = bit ? current->right : current->left;
                 
                 if (current && current->isLeaf) {
-                    outFile.put(current->byte);
+                    char decodedChar = current->byte;
+                    if (isEncrypted) {
+                    decodedChar = decryptByte(decodedChar);
+                    }
+                    outFile.put(decodedChar);
                     decodedSize++;
                     current = root;
                 }
@@ -424,15 +442,20 @@ public:
 int main() {
     HuffmanDecompression decompressor;
     string compressedFile;
+    char choice;
     
     cout << "请输入压缩文件路径(.hfm): ";
     getline(cin, compressedFile);
 
+    cout << "该文件是否经过加密？(Y/N): ";
+    cin >> choice;
+    bool isEncrypted = (toupper(choice) == 'Y');
+
     // 加载编码表并解压
     if (!decompressor.loadCodeTable("code.txt") || 
-        !decompressor.decompress(compressedFile)) {
+        !decompressor.decompress(compressedFile, isEncrypted)) {
         return 1;
     }
-
+    cout<<"解压成功！"<<endl;
     return 0;
 }
