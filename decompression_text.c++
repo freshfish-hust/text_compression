@@ -169,40 +169,69 @@ private:
         string decodedInfo;
         DecodeNode* current = root;
         char byte;
-        bool foundSeparator = false;
-
-        while (file.get(byte) && !foundSeparator) {
+        int newlineCount = 0;
+        auto startTime = high_resolution_clock::now();  // 开始计时
+        while (file.get(byte)) {
             unsigned char curByte = static_cast<unsigned char>(byte);
             for (int bitPos = 7; bitPos >= 0; bitPos--) {
                 bool bit = (curByte >> bitPos) & 1;
                 current = bit ? current->right : current->left;
-
+    
                 if (current && current->isLeaf) {
-                    decodedInfo += current->byte;
+                    char decodedChar = current->byte;
+                    decodedInfo += decodedChar;
                     current = root;
-                    
-                    // 检查是否找到分隔符
-                    if (decodedInfo.length() >= 24) {  // "------------------------" 的长度
-                        size_t pos = decodedInfo.find("------------------------");
-                        if (pos != string::npos) {
-                            decodedInfo = decodedInfo.substr(0, pos + 24);  // 保留分隔符
-                            foundSeparator = true;
-                            break;
+    
+                    if (decodedChar == '\n') {
+                        newlineCount++;
+                        if (newlineCount >= 4) {  // 四行用户信息已读取完毕
+                           
+                            size_t pos = decodedInfo.find("------------------------", 
+                                       decodedInfo.length() - 30);  // 只在最后30个字符中查找
+                            if (pos != string::npos) {
+                                decodedInfo = decodedInfo.substr(0, pos + 24);
+                                auto endTime = high_resolution_clock::now();
+                                auto duration = duration_cast<microseconds>(endTime - startTime);
+                                cout << "用户信息解码耗时: " << duration.count() / 1000000.0 
+                                     << " 秒" << endl;
+                                return parseUserInfo(decodedInfo);  // 解析用户信息
+                            }
                         }
                     }
                 }
             }
         }
+        cout<<"行数: "<<newlineCount<<endl;
+        cerr << "未找到完整的用户信息" << endl;
+        return false;
 
+    }
 
-        // 在处理用户信息之前添加调试输出
-        cout << "解码后的原始信息：\n" << decodedInfo << endl;
+    // 验证用户身份
+    bool verifyIdentity() {
+        string configID, configName;
+        if (!loadIdentityInfo(configID, configName)) {
+            return false;
+        }
 
-        // 解析用户信息
+        if (userInfo.receiverID != configID || userInfo.receiverName != configName) {
+            cerr << "\n身份验证失败！" << endl;
+            cerr << "压缩文件中的接收者信息：" << endl;
+            cerr << "学号: " << userInfo.receiverID << endl;
+            cerr << "姓名: " << userInfo.receiverName << endl;
+            cerr << "\n本地配置的身份信息：" << endl;
+            cerr << "学号: " << configID << endl;
+            cerr << "姓名: " << configName << endl;
+            return false;
+        }
+        return true;
+    }
+
+    bool parseUserInfo(const string& decodedInfo){
         stringstream userInfoStream(decodedInfo);
         string line;
         int count = 0;
-        
+
         while (count < 5 && getline(userInfoStream, line)) {
             if (count == 0 && line.find("发送方学号: ") == 0) {
                 userInfo.senderID = line.substr(17);  // 17是"发送方学号: "的长度
@@ -249,30 +278,10 @@ private:
             return false;
         }
 
-        cout << "\n读取到的用户信息：" << endl;
-        cout << "发送方：" << userInfo.senderID << " - " << userInfo.senderName << endl;
-        cout << "接收方：" << userInfo.receiverID << " - " << userInfo.receiverName << endl;
+        // cout << "\n读取到的用户信息：" << endl;
+        // cout << "发送方：" << userInfo.senderID << " - " << userInfo.senderName << endl;
+        // cout << "接收方：" << userInfo.receiverID << " - " << userInfo.receiverName << endl;
 
-        return true;
-    }
-
-    // 验证用户身份
-    bool verifyIdentity() {
-        string configID, configName;
-        if (!loadIdentityInfo(configID, configName)) {
-            return false;
-        }
-
-        if (userInfo.receiverID != configID || userInfo.receiverName != configName) {
-            cerr << "\n身份验证失败！" << endl;
-            cerr << "压缩文件中的接收者信息：" << endl;
-            cerr << "学号: " << userInfo.receiverID << endl;
-            cerr << "姓名: " << userInfo.receiverName << endl;
-            cerr << "\n本地配置的身份信息：" << endl;
-            cerr << "学号: " << configID << endl;
-            cerr << "姓名: " << configName << endl;
-            return false;
-        }
         return true;
     }
 
