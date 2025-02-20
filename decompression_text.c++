@@ -27,44 +27,57 @@ struct DecodeNode {
     DecodeNode() : byte(0), isLeaf(false), left(nullptr), right(nullptr) {}
     DecodeNode(unsigned char b) : byte(b), isLeaf(true), left(nullptr), right(nullptr) {}
 };
-
+enum class EncryptionType {
+    NONE,
+    OFFSET,
+    XOR_KEY
+};
+const string DEFAULT_KEY = "HuffmanSecretKey2024";  // 可以根据需要修改默认密钥
 class HuffmanDecompression {
 private:
     DecodeNode* root;
     long originalFileSize;
     UserInfo userInfo;
+    static const uint8_t OFFSET_VALUE = 0x55;
     static const int ID_LENGTH = 10;        // 学号固定长度
     static const int MAX_NAME_LENGTH = 20;  // 姓名最大长度
     //解密单个字节
-    char decryptByte(char byte) {
-        return byte - 0x55;
+    char decryptByte(char byte,EncryptionType type, const string& key = "", size_t keyIndex = 0) {
+        switch(type) {
+            case EncryptionType::OFFSET:
+                return byte - OFFSET_VALUE;
+            case EncryptionType::XOR_KEY:
+                return byte ^ key[keyIndex % key.length()];
+            default:
+                return byte;
+        }
     }
     //解密文件内容
-    bool decryptContent(const string& inputPath, const string& outputPath) {
-        ifstream inFile(inputPath, ios::binary);
-        ofstream outFile(outputPath, ios::binary);
+    // bool decryptContent(const string& inputPath, const string& outputPath) {
+    //     ifstream inFile(inputPath, ios::binary);
+    //     ofstream outFile(outputPath, ios::binary);
         
-        if (!inFile || !outFile) {
-            cerr << "打开文件失败" << endl;
-            return false;
-        }
+    //     if (!inFile || !outFile) {
+    //         cerr << "打开文件失败" << endl;
+    //         return false;
+    //     }
 
-        char byte;
-        while (inFile.get(byte)) {
-            outFile.put(decryptByte(byte));
-        }
+    //     char byte;
+    //     while (inFile.get(byte)) {
+    //         outFile.put(decryptByte(byte));
+    //     }
 
-        inFile.close();
-        outFile.close();
-        return true;
-    }
+    //     inFile.close();
+    //     outFile.close();
+    //     return true;
+    // }
     // 解密并验证用户信息
-    bool readAndVerifyUserInfo(ifstream& file, DecodeNode* root, bool isEncrypted) {
+    bool readAndVerifyUserInfo(ifstream& file, DecodeNode* root, EncryptionType encType, const string& key = "") {
         string decodedInfo;
         DecodeNode* current = root;
         char byte;
         int newlineCount = 0;
-
+        size_t keyIndex = 0;
         while (file.get(byte)) {
 
             unsigned char curByte = static_cast<unsigned char>(byte);
@@ -74,8 +87,8 @@ private:
 
                 if (current && current->isLeaf) {
                     char decodedChar = current->byte;
-                    if (isEncrypted) {
-                    decodedChar = decryptByte(decodedChar);
+                    if (encType != EncryptionType::NONE) {
+                    decodedChar = decryptByte(decodedChar,encType, key, keyIndex++);
                 }
                     decodedInfo += decodedChar;
                     current = root;
@@ -83,7 +96,6 @@ private:
                     if (decodedChar == '\n') {
                         newlineCount++;
                         if (newlineCount >= 4) {
-                           
                             size_t pos = decodedInfo.find("------------------------");
                             if (pos != string::npos) {
                                 decodedInfo = decodedInfo.substr(0, pos + 24);
@@ -354,14 +366,15 @@ public:
     }
 
     // 解压缩文件
-    bool decompress(const string& compressedPath, bool isEncrypted = false) {
+    bool decompress(const string& compressedPath, EncryptionType encType = EncryptionType::NONE,
+        const string& key = DEFAULT_KEY) {
         ifstream inFile(compressedPath, ios::binary);
         if (!inFile) {
             cerr << "无法打开压缩文件！" << endl;
             return false;
         }
         // 验证用户信息
-        if (!readAndVerifyUserInfo(inFile, root, isEncrypted)) {
+        if (!readAndVerifyUserInfo(inFile, root, encType, key)) {
             cerr << "用户信息验证失败！" << endl;
             return false;
         }
@@ -390,7 +403,7 @@ public:
         long decodedSize = 0;
         char byte;
         unsigned char bitPos = 7;
-
+        size_t keyIndex = 0;
         while (inFile.get(byte) && decodedSize < originalFileSize) {
 
             // 如果是加密文件，先解密字节
@@ -402,8 +415,8 @@ public:
                 
                 if (current && current->isLeaf) {
                     char decodedChar = current->byte;
-                    if (isEncrypted) {
-                    decodedChar = decryptByte(decodedChar);
+                    if (encType != EncryptionType::NONE) {
+                    decodedChar = decryptByte(decodedChar,encType, key, keyIndex++);
                     }
                     outFile.put(decodedChar);
                     decodedSize++;
@@ -442,18 +455,46 @@ public:
 int main() {
     HuffmanDecompression decompressor;
     string compressedFile;
-    char choice;
+    string customKey;
     
     cout << "请输入压缩文件路径(.hfm): ";
     getline(cin, compressedFile);
 
-    cout << "该文件是否经过加密？(Y/N): ";
-    cin >> choice;
-    bool isEncrypted = (toupper(choice) == 'Y');
+    cout << "请选择解密方式：" << endl;
+    cout << "0. 未加密文件" << endl;
+    cout << "1. 偏移加密" << endl;
+    cout << "2. XOR密钥加密" << endl;
+    cout << "请输入选择 (0-2): ";
+    
+    int encChoice;
+    cin >> encChoice;
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
 
+    EncryptionType encType = EncryptionType::NONE;
+    string key = DEFAULT_KEY;
+
+    switch (encChoice) {
+        case 1:
+            encType = EncryptionType::OFFSET;
+            cout << "使用偏移解密方式" << endl;
+            break;
+        case 2:
+            encType = EncryptionType::XOR_KEY;
+            cout << "是否使用自定义密钥？(Y/N，默认使用内置密钥): ";
+            if (toupper(cin.get()) == 'Y') {
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                cout << "请输入密钥: ";
+                getline(cin, customKey);
+                key = customKey;
+            }
+            break;
+        default:
+            encType = EncryptionType::NONE;
+            cout << "不进行解密" << endl;
+    }
     // 加载编码表并解压
     if (!decompressor.loadCodeTable("code.txt") || 
-        !decompressor.decompress(compressedFile, isEncrypted)) {
+        !decompressor.decompress(compressedFile, encType, key)) {
         return 1;
     }
     cout<<"解压成功！"<<endl;

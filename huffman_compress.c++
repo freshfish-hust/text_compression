@@ -27,11 +27,21 @@ struct UserInfo {
     string receiverID;    // 接收方学号
     string receiverName;  // 接收方姓名
 };
+// 类外定义密钥
+const string DEFAULT_KEY = "HuffmanSecretKey2024";  // 可以根据需要修改默认密钥
+// 添加加密类型枚举
+enum class EncryptionType {
+    NONE,
+    OFFSET,
+    XOR_KEY
+};
+
 class HuffmanCompression {
 private:
     vector<HuffmanNode*> heap;
     map<unsigned char, string> huffmanCodes; // 存储每个字节的哈夫曼编码
-
+     // 添加密钥常量
+    static const uint8_t OFFSET_VALUE = 0x55;
     // 堆的比较函数：词频小的优先，词频相同时按字节值排序
     static bool compareNodes(HuffmanNode* a, HuffmanNode* b) {
         if (a->frequency != b->frequency) {
@@ -193,7 +203,7 @@ private:
     }
 
     // 加密文件内容（每个字节加上0x55）
-    string encryptFile(const string& inputFile) {
+    string encryptFile(const string& inputFile,EncryptionType type, const string& key = "") {
         string encryptedFile = inputFile;
         size_t lastDot = encryptedFile.find_last_of('.');
         if (lastDot != string::npos) {
@@ -208,10 +218,19 @@ private:
             cerr << "加密过程中打开文件失败" << endl;
             return "";
         }
-
+        size_t keyIndex = 0;
         char byte;
         while (inFile.get(byte)) {
-            byte = byte + 0x55;
+            switch(type){
+                case EncryptionType::OFFSET:
+                    byte += OFFSET_VALUE;
+                    break;
+                case EncryptionType::XOR_KEY:
+                    byte ^= key[keyIndex++ % key.length()];
+                    break;
+                default:
+                    break;
+            }
             outFile.put(byte);
         }
 
@@ -595,7 +614,8 @@ public:
     }
 
     // 压缩处理的统一接口
-    bool compressFile(const string& filename, const UserInfo& userInfo, bool is_encrypted = false){
+    bool compressFile(const string& filename, const UserInfo& userInfo, EncryptionType encType = EncryptionType::NONE,
+        const string& key = DEFAULT_KEY){
     
         uint64_t origin_hash = getFileHash(filename);
         // 打印文件基本信息
@@ -630,12 +650,13 @@ public:
         displayCodeTable();
         // 7. 如果需要加密，在这里添加加密处理
         string fileToCompress = processedFile;
-        if (is_encrypted) {
+        if (encType != EncryptionType::NONE) {
             cout << "\n开始加密处理..." << endl;
+            cout << "加密方式: " << (encType == EncryptionType::OFFSET ? "偏移" : "XOR") << endl;
             cout << "加密前WPL值：" << ori_wpl << endl;
             
             // 加密文件
-            string encryptedFile = encryptFile(processedFile);
+            string encryptedFile = encryptFile(processedFile, encType, key);
             if (encryptedFile.empty()) {
                 cerr << "加密失败！" << endl;
                 remove(processedFile.c_str());
@@ -671,7 +692,7 @@ public:
         // 8. 压缩文件
         if (!generateCompressedFile(fileToCompress)) {
             cerr << "生成压缩文件失败！" << endl;
-            if (is_encrypted) {
+            if (encType != EncryptionType::NONE) {
                 remove(fileToCompress.c_str());
             }
             remove(processedFile.c_str());
@@ -680,7 +701,7 @@ public:
         // 9. 显示压缩结果
         encodeAndShowLast16Bytes(fileToCompress);
         // 10. 清理临时文件
-        if (is_encrypted) {
+        if (encType != EncryptionType::NONE) {
             remove(fileToCompress.c_str());
         }
         remove(processedFile.c_str());
@@ -714,13 +735,38 @@ int main() {
     cout << "姓名: ";
     getline(cin, userInfo.receiverName);
 
-    // 3. 询问是否需要加密
-    cout << "\n是否需要加密压缩?(Y/N,默认N): ";
-    choice = cin.get();
-    bool is_encrypted = (toupper(choice) == 'Y');
+    // 3. 询问加密方式
+    EncryptionType encType = EncryptionType::NONE;
+    string customKey;
+    cout << "\n请选择加密方式：" << endl;
+    cout << "0. 不加密" << endl;
+    cout << "1. 偏移加密" << endl;
+    cout << "2. XOR密钥加密" << endl;
+    cout << "请输入选择 (0-2): ";
+    
+    int encChoice;
+    cin >> encChoice;
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
 
+    switch (encChoice) {
+        case 1:
+            encType = EncryptionType::OFFSET;
+            break;
+        case 2:
+            encType = EncryptionType::XOR_KEY;
+            cout << "是否使用自定义密钥？(Y/N，默认使用内置密钥): ";
+            if (cin.get() == 'Y' || cin.get() == 'y') {
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                cout << "请输入密钥: ";
+                getline(cin, customKey);
+            }
+            break;
+        default:
+            encType = EncryptionType::NONE;
+    }
     // 4. 执行压缩处理
-    if (!huffman.compressFile(filename, userInfo, is_encrypted)) {
+    if (!huffman.compressFile(filename, userInfo, encType,
+    customKey.empty() ? DEFAULT_KEY : customKey)) {
         return 1;
     }
 
