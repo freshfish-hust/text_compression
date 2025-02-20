@@ -52,25 +52,7 @@ private:
                 return byte;
         }
     }
-    //解密文件内容
-    // bool decryptContent(const string& inputPath, const string& outputPath) {
-    //     ifstream inFile(inputPath, ios::binary);
-    //     ofstream outFile(outputPath, ios::binary);
-        
-    //     if (!inFile || !outFile) {
-    //         cerr << "打开文件失败" << endl;
-    //         return false;
-    //     }
-
-    //     char byte;
-    //     while (inFile.get(byte)) {
-    //         outFile.put(decryptByte(byte));
-    //     }
-
-    //     inFile.close();
-    //     outFile.close();
-    //     return true;
-    // }
+    
     // 解密并验证用户信息
     bool readAndVerifyUserInfo(ifstream& file, DecodeNode* root, EncryptionType encType, const string& key = "") {
         string decodedInfo;
